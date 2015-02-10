@@ -1,23 +1,22 @@
 package cs455.overlay.transport;
 
-import java.io.*;
+// TCPServer.java
+// A server program implementing TCP socket
 import java.net.*;
+import java.io.*;
 
 public class TCPServer {
-	public static void main(String argv[]) throws Exception {
-		String clientSentence;
-        String capitalizedSentence;
-        @SuppressWarnings("resource")
-		ServerSocket welcomeSocket = new ServerSocket(6789);
-
-        while(true) {
-        	Socket connectionSocket = welcomeSocket.accept();
-            BufferedReader inFromClient = new BufferedReader(new InputStreamReader(connectionSocket.getInputStream()));
-            DataOutputStream outToClient = new DataOutputStream(connectionSocket.getOutputStream());
-            clientSentence = inFromClient.readLine();
-            System.out.println("Received: " + clientSentence);
-            capitalizedSentence = clientSentence.toUpperCase() + '\n';
-            outToClient.writeBytes(capitalizedSentence);
-        }
+	public static void main (String args[]) {
+		try {
+			int serverPort = 6880;
+			ServerSocket listenSocket = new ServerSocket(serverPort);
+	  
+			System.out.println("Server is now listening... ... ...");
+			while(true) {
+				Socket clientSocket = listenSocket.accept();
+				TCPConnection c = new TCPConnection(clientSocket);
+			}
+		}catch(IOException e) {
+			System.out.println("Listen :"+e.getMessage());}
 	}
 }

@@ -9,8 +9,8 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 
 public class WireFormatWidget {
-	private int type;
-	private long timestamp;
+	private int type;//Message Type
+	private long timestamp;//
 	private String identifier;
 	private int tracker;
 	
