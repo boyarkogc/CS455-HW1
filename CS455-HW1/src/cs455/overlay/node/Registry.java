@@ -75,16 +75,20 @@ public class Registry {
 						//create new streams to read data from the byte array
 						ByteArrayInputStream baInputStream = new ByteArrayInputStream(data);
 						DataInputStream din2 = new DataInputStream(new BufferedInputStream(baInputStream));
-						//read the type of message
+						//read the type of message(OverlayNodeSendsRegistration, OverlayNodeSendsDeregistration, etc.)
 						type = din2.readInt();
 						//do different things depending on the type of message received
 						switch (type) {
+							//read the node's IP and port, and if they aren't in the overlay, add them
+							//and let them know they were added; also send them their assigned ID
 							case OverlayNodeSendsRegistration:
 								OverlayNodeSendsRegistration reg = new OverlayNodeSendsRegistration(data);
 								nodeIP = reg.getipAddress();
 								nodePort = reg.getPort();
 								System.out.println(nodeIP + " " + nodePort);
 								break;
+							//if this node was already in the overlay, remove it and let it know it was removed
+							//otherwise, send them an error message
 							case OverlayNodeSendsDeregistration:
 								break;
 						}
