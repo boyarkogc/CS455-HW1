@@ -1,26 +1,53 @@
 package cs455.overlay.node;
 
 import java.net.*;
-import java.util.HashSet;
+import java.util.ArrayList;
+import java.util.Random;
 import java.io.*; 
 
+import cs455.overlay.routing.RoutingEntry;
 import cs455.overlay.wireformats.*;
 
 public class Registry {
-	private static HashSet<Integer> IDs = new HashSet<Integer>();
-	private static HashSet<PrintWriter> writers = new HashSet<PrintWriter>();
-
-	private static final int port = 4444;
-	
 	private static final int OverlayNodeSendsRegistration = 2;
-	//private static final int RegistryReportsRegistrationStatus = 3;
 	private static final int OverlayNodeSendsDeregistration = 4;
-	//private static final int RegistryReportsDeregistrationStatus = 5;
+	private static final int NodeReportsOverlaySetupStatus = 7;
+	private static final int OverlayNodeReportsTaskFinished = 10;
+	private static final int OverlayNodeReportsTrafficSummary = 12;
+	
+	private static ArrayList<RoutingEntry> overlay;
+	private static ArrayList<Integer> unusedIDs;
+	
+	private static Random rand;
 	
 	private static Registry registry = new Registry();
 	
 	private Registry() {
 		
+	}
+	
+	private synchronized static int getUnusedID() {
+		int randomNum = rand.nextInt((unusedIDs.size()));
+		int ID = unusedIDs.get(randomNum);
+		unusedIDs.remove(randomNum);
+		return ID;
+	}
+	
+	private synchronized static boolean inRegistry(String ipAddress, int port) {
+		for (int i = 0; i < overlay.size(); i++) {
+			if (overlay.get(i).getIpAddress().equals(ipAddress) && overlay.get(i).getPort() == port) {
+				return true;
+			}
+		}
+		return false;
+	}
+	
+	private synchronized static void removeFromRegistry(String ipAddress, int port, int ID) {
+		for (int i = 0; i < overlay.size(); i++) {
+			if (overlay.get(i).getIpAddress().equals(ipAddress) && overlay.get(i).getPort() == port) {
+				overlay.remove(i);
+			}
+		}
 	}
 	
 	public static Registry getInstance() {
@@ -32,8 +59,14 @@ public class Registry {
 	}*/
 	public static void main(String[] args) throws Exception {
 		Registry reg = Registry.getInstance();
-		System.out.println("The registry is running.");
-        ServerSocket registry = new ServerSocket(port);
+		overlay = new ArrayList<RoutingEntry>();
+		unusedIDs = new ArrayList<Integer>();
+		rand = new Random();
+		for (int i = 0; i < 128; i++) {
+			unusedIDs.add(i);
+		}
+        ServerSocket registry = new ServerSocket(4444);
+		System.out.println("Registry is running");
         try {
             while (true) {
                 new RegistryThread(registry.accept()).start();
@@ -45,8 +78,6 @@ public class Registry {
 	
 	private static class RegistryThread extends Thread {
 		private int ID;
-		private String nodeIP;
-		private int nodePort;
 		private Socket socket;
 		private DataInputStream din;
 		private DataOutputStream dout;
@@ -57,6 +88,13 @@ public class Registry {
 		*/
 		public RegistryThread(Socket socket) {
 			this.socket = socket;
+		}
+		
+		public void sendData(byte[] dataToSend) throws IOException {
+			int dataLength = dataToSend.length;
+			dout.writeInt(dataLength);
+			dout.write(dataToSend, 0, dataLength);
+			dout.flush();
 		}
 		
 		public void run() {
@@ -83,13 +121,40 @@ public class Registry {
 							//and let them know they were added; also send them their assigned ID
 							case OverlayNodeSendsRegistration:
 								OverlayNodeSendsRegistration reg = new OverlayNodeSendsRegistration(data);
-								nodeIP = reg.getipAddress();
-								nodePort = reg.getPort();
-								System.out.println(nodeIP + " " + nodePort);
+								if (inRegistry(reg.getipAddress(), reg.getPort())) {
+									RegistryReportsRegistrationStatus status = new RegistryReportsRegistrationStatus(-1, "Registration request " +
+										"unsuccessful. You are already registered within the overlay.");
+									sendData(status.getBytes());
+								}else {
+									ID = getUnusedID();
+									RoutingEntry node = new RoutingEntry(reg.getipAddress(), reg.getPort(), ID);
+									overlay.add(node);
+									RegistryReportsRegistrationStatus status = new RegistryReportsRegistrationStatus(ID, "Registration request " +
+										"successful. The number of nodes currently constituting the overlay is " + overlay.size());
+									sendData(status.getBytes());
+								}
 								break;
 							//if this node was already in the overlay, remove it and let it know it was removed
 							//otherwise, send them an error message
 							case OverlayNodeSendsDeregistration:
+								OverlayNodeSendsDeregistration dereg = new OverlayNodeSendsDeregistration(data);
+								if (inRegistry(dereg.getipAddress(), dereg.getPort())) {
+									removeFromRegistry(dereg.getipAddress(), dereg.getPort(), dereg.getID());
+									RegistryReportsDeregistrationStatus status2 = new RegistryReportsDeregistrationStatus(ID, "Deregistration request " +
+											"successful. You have been removed from the overlay.");
+									sendData(status2.getBytes());
+								}else {
+									ID = -1;
+									RegistryReportsDeregistrationStatus status2 = new RegistryReportsDeregistrationStatus(ID, "Deregistration request " +
+										"unsuccessful. You were not in the overlay.");
+									sendData(status2.getBytes());
+								}
+								break;
+							case NodeReportsOverlaySetupStatus:
+								break;
+							case OverlayNodeReportsTaskFinished:
+								break;
+							case OverlayNodeReportsTrafficSummary:
 								break;
 						}
 						baInputStream.close();

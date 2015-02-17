@@ -22,17 +22,17 @@ public class OverlayNodeSendsRegistration {
 		
 		marshalledBytes = null;
 		ByteArrayOutputStream baOutputStream = new ByteArrayOutputStream();
-		DataOutputStream dout2 = new DataOutputStream(new BufferedOutputStream(baOutputStream));
+		DataOutputStream dout = new DataOutputStream(new BufferedOutputStream(baOutputStream));
 		
-		dout2.writeInt(2);
-		dout2.writeInt(ipLength);
-		dout2.write(ipData);
-		dout2.writeInt(port);
-		dout2.flush();
+		dout.writeInt(2);
+		dout.writeInt(ipLength);
+		dout.write(ipData);
+		dout.writeInt(port);
+		dout.flush();
 		
 		marshalledBytes = baOutputStream.toByteArray();
 		baOutputStream.close();
-		dout2.close();
+		dout.close();
 	}
 	
 	public OverlayNodeSendsRegistration(byte[] marshalledBytes) throws IOException {
