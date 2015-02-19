@@ -19,6 +19,7 @@ public class Registry {
 	private static LinkedList<RoutingEntry> overlay;
 	private static ArrayList<Integer> unusedIDs;
 	//private static ArrayList<RegistryThread> threads;
+	private static int nodesReady;
 	
 	private static Random rand;
 	
@@ -42,6 +43,14 @@ public class Registry {
 			}
 		}
 		return false;
+	}
+	
+	private synchronized static void incrementNodesReady() {
+		nodesReady++;
+	}
+	
+	private synchronized static void resetNodesReady() {
+		nodesReady = 0;
 	}
 	
 	private synchronized static void addToOverlay(String ipAddress, int port, int ID, Socket socket, DataOutputStream dout, DataInputStream din) {
@@ -82,6 +91,8 @@ public class Registry {
 		int totalNodes = overlay.size();
 		int[] nodeIDs = new int[overlay.size()];
 		
+		resetNodesReady();
+		
 		for (int i = 0; i < overlay.size(); i++) {
 			nodeIDs[i] = overlay.get(i).getID();
 		}
@@ -111,13 +122,18 @@ public class Registry {
 			dout.writeInt(routingTable.getBytes().length);
 			dout.write(routingTable.getBytes());
 			dout.flush();
-			System.out.println("Hi");
 		}
 	}
 	
-	/*protected static void demoMethod() {
-		///////
-	}*/
+	private synchronized static void taskInitiate(int numPackets) throws IOException {
+		RegistryRequestsTaskInitiate task = new RegistryRequestsTaskInitiate(numPackets);
+		for (int j = 0; j < overlay.size(); j++) {
+			overlay.get(j).getDout().writeInt(task.getMarshalledBytes().length);
+			overlay.get(j).getDout().write(task.getMarshalledBytes());
+			overlay.get(j).getDout().flush();
+		}
+	}
+	
 	public static void main(String[] args) throws Exception {
 		Registry reg = Registry.getInstance();
 		overlay = new LinkedList<RoutingEntry>();
@@ -196,7 +212,8 @@ public class Registry {
 									addToOverlay(reg.getipAddress(), reg.getPort(), ID, socket, 
 											new DataOutputStream(socket.getOutputStream()), new DataInputStream(socket.getInputStream()));
 									RegistryReportsRegistrationStatus status = new RegistryReportsRegistrationStatus(ID, "Registration request " +
-										"successful. The number of nodes currently constituting the overlay is " + overlay.size());
+										"successful. The number of nodes currently constituting the overlay is " + overlay.size() + "\n" + "Your ID is "
+											+ ID);
 									sendData(status.getBytes());
 								}
 								break;
@@ -217,6 +234,10 @@ public class Registry {
 								}
 								break;
 							case NodeReportsOverlaySetupStatus:
+								NodeReportsOverlaySetupStatus setupStatus = new NodeReportsOverlaySetupStatus(data);
+								if (setupStatus.getSuccessStatus() != -1) {
+									incrementNodesReady();
+								}
 								break;
 							case OverlayNodeReportsTaskFinished:
 								break;
@@ -295,6 +316,7 @@ public class Registry {
 					}
 					break;
 				case "start":
+					taskInitiate(Integer.parseInt(splitMessage[1]));
 					break;
 				default:
 					System.out.println("Command could not be understood.");

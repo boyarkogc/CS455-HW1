@@ -9,7 +9,11 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 
 public class OverlayNodeSendsData {
-	String info;
+	int sourceID;
+	int destID;
+	int payload;
+	int[] traceIDs;
+	
 	byte[] marshalledBytes;
 	
 	public OverlayNodeSendsData(byte[] data) throws IOException {
@@ -19,38 +23,67 @@ public class OverlayNodeSendsData {
 		DataInputStream din = new DataInputStream(new BufferedInputStream(baInputStream));
 		
 		int type = din.readInt();
-		int infoLength = din.readInt();
-		byte[] infoBytes = new byte[infoLength];
-		din.readFully(infoBytes);
-		info = new String(infoBytes);
+		destID = din.readInt();
+		sourceID = din.readInt();
+		payload = din.readInt();
+		
+		int traceLength = din.readInt();
+		traceIDs = new int[traceLength];
+		for (int i = 0; i < traceLength; i++) {
+			traceIDs[i] = din.readInt();
+		}
 		
 		baInputStream.close();
 		din.close();
 	}
 	
-	public OverlayNodeSendsData(String info) throws IOException {
-		this.info = info;
+	public OverlayNodeSendsData(int sourceID, int destID, int payload, int[]traceIDs) throws IOException {
 		marshalledBytes = null;
 		
-		ByteArrayOutputStream baOutputStream = new ByteArrayOutputStream();
-		DataOutputStream dout2 = new DataOutputStream(new BufferedOutputStream(baOutputStream));
+		this.sourceID = sourceID;
+		this.destID = destID;
+		this.payload = payload;
+		this.traceIDs = traceIDs;
 		
-		dout2.writeInt(9);
-		byte[] infoBytes = info.getBytes();
-		dout2.writeInt(infoBytes.length);
-		dout2.write(infoBytes);
-		dout2.flush();
+		ByteArrayOutputStream baOutputStream = new ByteArrayOutputStream();
+		DataOutputStream dout = new DataOutputStream(new BufferedOutputStream(baOutputStream));
+		
+		dout.writeInt(9);
+		dout.writeInt(destID);
+		dout.writeInt(sourceID);
+		dout.writeInt(payload);
+		dout.writeInt(traceIDs.length);
+		for (int i = 0; i < traceIDs.length; i++) {
+			dout.writeInt(traceIDs[i]);
+		}
+		dout.flush();
 		
 		marshalledBytes = baOutputStream.toByteArray();
 		baOutputStream.close();
-		dout2.close();
+		dout.close();
 	}
 	
-	public byte[] getBytes() {
+	public OverlayNodeSendsData() {
+		
+	}
+
+	public int getSourceID() {
+		return sourceID;
+	}
+
+	public int getDestID() {
+		return destID;
+	}
+
+	public int getPayload() {
+		return payload;
+	}
+
+	public int[] getTraceIDs() {
+		return traceIDs;
+	}
+
+	public byte[] getMarshalledBytes() {
 		return marshalledBytes;
-	}
-	
-	public String getInfo() {
-		return info;
 	}
 }
