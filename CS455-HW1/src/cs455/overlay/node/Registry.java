@@ -2,6 +2,7 @@ package cs455.overlay.node;
 
 import java.net.*;
 import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.Random;
 import java.io.*; 
 
@@ -15,8 +16,9 @@ public class Registry {
 	private static final int OverlayNodeReportsTaskFinished = 10;
 	private static final int OverlayNodeReportsTrafficSummary = 12;
 	
-	private static ArrayList<RoutingEntry> overlay;
+	private static LinkedList<RoutingEntry> overlay;
 	private static ArrayList<Integer> unusedIDs;
+	//private static ArrayList<RegistryThread> threads;
 	
 	private static Random rand;
 	
@@ -42,6 +44,21 @@ public class Registry {
 		return false;
 	}
 	
+	private synchronized static void addToOverlay(String ipAddress, int port, int ID, Socket socket, DataOutputStream dout, DataInputStream din) {
+		RoutingEntry node = new RoutingEntry(ipAddress, port, ID, socket, dout, din);
+		int index = 0;
+		for (int i = 0; i < overlay.size(); i++) {
+			if (overlay.get(i).getID() < ID) {
+				index = i + 1;
+			}
+		}
+		if (index >= overlay.size()) {
+			overlay.add(node);
+		}else {
+			overlay.add(index, node);
+		}
+	}
+	
 	private synchronized static void removeFromRegistry(String ipAddress, int port, int ID) {
 		for (int i = 0; i < overlay.size(); i++) {
 			if (overlay.get(i).getIpAddress().equals(ipAddress) && overlay.get(i).getPort() == port) {
@@ -54,22 +71,71 @@ public class Registry {
 		return registry;
 	}
 	
+	private synchronized static void setupOverlay() throws IOException {
+		int ID1, ID2, ID3;
+		String ipAddress1, ipAddress2, ipAddress3;
+		int port1, port2, port3;
+		int routingTableSize = 3;
+		
+		DataOutputStream dout;
+		
+		int totalNodes = overlay.size();
+		int[] nodeIDs = new int[overlay.size()];
+		
+		for (int i = 0; i < overlay.size(); i++) {
+			nodeIDs[i] = overlay.get(i).getID();
+		}
+		
+		for (int j = 0; j < overlay.size(); j++) {
+			int counter = j;
+			dout = overlay.get(j).getDout();
+			
+			counter = (j + 1) % overlay.size();
+			ID1 = overlay.get(counter).getID();
+			ipAddress1 = overlay.get(counter).getIpAddress();
+			port1 = overlay.get(counter).getPort();
+			
+			counter = (j + 2) % overlay.size();
+			ID2 = overlay.get(counter).getID();
+			ipAddress2 = overlay.get(counter).getIpAddress();
+			port2 = overlay.get(counter).getPort();
+			
+			counter = (j + 4) % overlay.size();
+			ID3 = overlay.get(counter).getID();
+			ipAddress3 = overlay.get(counter).getIpAddress();
+			port3 = overlay.get(counter).getPort();
+			
+			RegistrySendsNodeManifest routingTable = new RegistrySendsNodeManifest(ID1, ID2, ID3, 
+					ipAddress1, ipAddress2, ipAddress3, port1, port2, port3, routingTableSize, totalNodes, nodeIDs);
+			
+			dout.writeInt(routingTable.getBytes().length);
+			dout.write(routingTable.getBytes());
+			dout.flush();
+			System.out.println("Hi");
+		}
+	}
+	
 	/*protected static void demoMethod() {
 		///////
 	}*/
 	public static void main(String[] args) throws Exception {
 		Registry reg = Registry.getInstance();
-		overlay = new ArrayList<RoutingEntry>();
+		overlay = new LinkedList<RoutingEntry>();
 		unusedIDs = new ArrayList<Integer>();
 		rand = new Random();
+		
 		for (int i = 0; i < 128; i++) {
 			unusedIDs.add(i);
 		}
         ServerSocket registry = new ServerSocket(4444);
+        RegistryCommandParser parser = new RegistryCommandParser();
+        parser.start();
+        
 		System.out.println("Registry is running");
         try {
             while (true) {
-                new RegistryThread(registry.accept()).start();
+            	new RegistryThread(registry.accept()).start();
+            	//threads.add(thread);
             }
         }finally {
             registry.close();
@@ -127,8 +193,8 @@ public class Registry {
 									sendData(status.getBytes());
 								}else {
 									ID = getUnusedID();
-									RoutingEntry node = new RoutingEntry(reg.getipAddress(), reg.getPort(), ID);
-									overlay.add(node);
+									addToOverlay(reg.getipAddress(), reg.getPort(), ID, socket, 
+											new DataOutputStream(socket.getOutputStream()), new DataInputStream(socket.getInputStream()));
 									RegistryReportsRegistrationStatus status = new RegistryReportsRegistrationStatus(ID, "Registration request " +
 										"successful. The number of nodes currently constituting the overlay is " + overlay.size());
 									sendData(status.getBytes());
@@ -173,6 +239,66 @@ public class Registry {
 				
 			}finally {
 				
+			}
+		}
+	}
+	
+	private static class RegistryCommandParser extends Thread {
+		public RegistryCommandParser() {}
+		
+		public void run() {
+			try {
+				BufferedReader fromConsole = new BufferedReader(new InputStreamReader(System.in));
+				String message = "";
+				while (true) {
+					message = fromConsole.readLine();
+					handleInput(message);
+				}
+			}
+			catch (Exception ex) {
+				System.out.println(ex.toString() + " Unexpected error while reading from console!");
+			}
+		}
+		
+		public void handleInput(String message) throws IOException {
+		    String[] splitMessage = message.split(" ");
+		    String first = splitMessage[0];
+		    
+			switch (first) {
+				case "list-messaging-nodes":
+					for (int i = 0; i < overlay.size(); i++) {
+						System.out.println("ipAddress: " + overlay.get(i).getIpAddress() + 
+								" port: " + overlay.get(i).getPort() +" ID: " + overlay.get(i).getID());
+					}
+					break;
+				case "setup-overlay":
+					setupOverlay();
+					break;
+				case "list-routing-tables":
+					for (int i = 0; i < overlay.size(); i++) {
+						int counter = i;
+						System.out.println("Routing table for Node " + overlay.get(i).getID() + ":");
+						
+						counter = (i + 1) % overlay.size();
+						System.out.println("ipAddress: " + overlay.get(counter).getIpAddress() + 
+								" port: " + overlay.get(counter).getPort() +" ID: " + overlay.get(counter).getID());
+						
+						counter = (i + 2) % overlay.size();
+						System.out.println("ipAddress: " + overlay.get(counter).getIpAddress() + 
+								" port: " + overlay.get(counter).getPort() +" ID: " + overlay.get(counter).getID());
+						
+						counter = (i + 4) % overlay.size();
+						System.out.println("ipAddress: " + overlay.get(counter).getIpAddress() + 
+								" port: " + overlay.get(counter).getPort() +" ID: " + overlay.get(counter).getID());
+						
+						System.out.println();
+					}
+					break;
+				case "start":
+					break;
+				default:
+					System.out.println("Command could not be understood.");
+					break;
 			}
 		}
 	}

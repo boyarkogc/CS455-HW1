@@ -28,11 +28,15 @@ public class MessagingNode extends Thread {
 	
 	//private Queue<OverlayNodeSendsData> relayQueue = new LinkedList<OverlayNodeSendsData>();
 	
-	public MessagingNode(Socket socket) throws IOException {
-		registry = new RoutingEntry(socket.getInetAddress().getHostAddress(), socket.getLocalPort(), RegistryID, socket, 
+	public MessagingNode(Socket socket, int port) throws IOException {
+		registry = new RoutingEntry(socket.getInetAddress().getHostAddress(), port, RegistryID, socket, 
 				new DataOutputStream(socket.getOutputStream()), new DataInputStream(socket.getInputStream()));
 		
 		register();
+	}
+	
+	public static int getID() {
+		return ID;
 	}
 	
 	public static void sendData(byte[] dataToSend, RoutingEntry dest) throws IOException {
@@ -44,7 +48,7 @@ public class MessagingNode extends Thread {
 	
 	public static void register() throws IOException {
 		OverlayNodeSendsRegistration reg = new OverlayNodeSendsRegistration(InetAddress.getLocalHost().getHostAddress(),
-				registry.getSocket().getLocalPort());
+				registry.getPort());
 		
 		sendData(reg.getBytes(), registry);
 	}
@@ -54,7 +58,37 @@ public class MessagingNode extends Thread {
 				registry.getSocket().getLocalPort(), ID);
 		
 		sendData(dereg.getBytes(), registry);
-		System.out.println("Hello");
+	}
+	
+	public static void connectToNode(String ipAddress, int port, int ID) throws UnknownHostException, IOException {
+		Socket socket = new Socket(ipAddress, port);
+		DataOutputStream dout = new DataOutputStream(socket.getOutputStream());
+		DataInputStream din = new DataInputStream(socket.getInputStream());
+		RoutingEntry node = new RoutingEntry(ipAddress, port, ID, socket, dout, din);
+		int index = 0;
+		
+		for (int i = 0; i < routingTable.size(); i++) {
+			if (routingTable.get(i).getID() < ID) {
+				index = i + 1;
+			}
+		}
+		if (index >= routingTable.size()) {
+			routingTable.add(node);
+		}else {
+			routingTable.add(index, node);
+		}
+		OverlayNodeSendsData overlaynode = new OverlayNodeSendsData("Hi, this is node " + getID());
+		sendData(overlaynode.getBytes(), node);
+	}
+	
+	public synchronized static RoutingEntry getRoutingTableEntry(int ID) {
+		int index = 0;
+		for (int i = 0; i < routingTable.size(); i++) {
+			if (routingTable.get(i).getID() <= ID) {
+				index = i;
+			}
+		}
+		return routingTable.get(index);
 	}
 	
 	public void run() {
@@ -94,6 +128,37 @@ public class MessagingNode extends Thread {
 						System.out.println(dereg.getInfo());	
 						break;
 					case RegistrySendsNodeManifest:
+						System.out.println("Hello");
+						RegistrySendsNodeManifest nodeManifest = new RegistrySendsNodeManifest(data);
+						
+						Socket socket = new Socket(nodeManifest.getIpAddress1(), nodeManifest.getPort1());
+						DataOutputStream dout = new DataOutputStream(socket.getOutputStream());
+						DataInputStream din = new DataInputStream(socket.getInputStream());
+						RoutingEntry entry = new RoutingEntry(nodeManifest.getIpAddress1(), nodeManifest.getPort1(), nodeManifest.getID1(), 
+								socket, dout, din);
+						routingTable.add(entry);
+						
+						socket = new Socket(nodeManifest.getIpAddress2(), nodeManifest.getPort2());
+						dout = new DataOutputStream(socket.getOutputStream());
+						din = new DataInputStream(socket.getInputStream());
+						entry = new RoutingEntry(nodeManifest.getIpAddress2(), nodeManifest.getPort2(), nodeManifest.getID2(), 
+								socket, dout, din);
+						routingTable.add(entry);
+						
+						socket = new Socket(nodeManifest.getIpAddress3(), nodeManifest.getPort3());
+						dout = new DataOutputStream(socket.getOutputStream());
+						din = new DataInputStream(socket.getInputStream());
+						entry = new RoutingEntry(nodeManifest.getIpAddress3(), nodeManifest.getPort3(), nodeManifest.getID3(), 
+								socket, dout, din);
+						routingTable.add(entry);
+						
+						System.out.println("Routing Table:");
+						System.out.println("ipAddress: " + routingTable.get(0).getIpAddress() + " port: " + routingTable.get(0).getPort() + 
+								" ID: " + routingTable.get(0).getID());
+						System.out.println("ipAddress: " + routingTable.get(1).getIpAddress() + " port: " + routingTable.get(1).getPort() + 
+								" ID: " + routingTable.get(1).getID());
+						System.out.println("ipAddress: " + routingTable.get(2).getIpAddress() + " port: " + routingTable.get(2).getPort() + 
+								" ID: " + routingTable.get(2).getID());
 						break;
 					case RegistryRequestsTaskInitiate:
 						break;
@@ -116,18 +181,20 @@ public class MessagingNode extends Thread {
 	public static void main (String args[]) throws NumberFormatException, IOException {
 		routingTable = new ArrayList<RoutingEntry>();
 		Socket socket = new Socket(args[0], Integer.parseInt(args[1]));
-		MessagingNode msg = new MessagingNode(socket);
-		msg.start();
+		
+		ServerSocket nodeServer = new ServerSocket(0);
+		MessagingNode msg = new MessagingNode(socket, nodeServer.getLocalPort());
 		NodeCommandParser parser = new NodeCommandParser();
+		msg.start();
 		parser.start();
-		/*ServerSocket nodeServer = new ServerSocket(0);
+		
 		try {
             while (true) {
                 new NodeServerThread(nodeServer.accept()).start();
             }
         }finally {
             nodeServer.close();
-        }*/
+        }
 	}
 	
 	private static class NodeServerThread extends Thread {
@@ -159,27 +226,9 @@ public class MessagingNode extends Thread {
 						type = din2.readInt();
 						//do different things depending on the type of message received
 						switch (type) {
-							case RegistryReportsRegistrationStatus:
-								RegistryReportsRegistrationStatus reg = new RegistryReportsRegistrationStatus(data);
-								if (reg.getID() != -1) {
-									ID = reg.getID();
-								}
-								System.out.println(reg.getInfo());
-								break;
-							case RegistryReportsDeregistrationStatus:
-								RegistryReportsDeregistrationStatus dereg = new RegistryReportsDeregistrationStatus(data);
-								if (dereg.getID() == -1) {
-									ID = dereg.getID();
-								}
-								System.out.println(dereg.getInfo());
-								break;
-							case RegistrySendsNodeManifest:
-								break;
-							case RegistryRequestsTaskInitiate:
-								break;
 							case OverlayNodeSendsData:
-								break;
-							case RegistryRequestsTrafficSummary:
+								OverlayNodeSendsData overlayNode = new OverlayNodeSendsData(data);
+								System.out.println(overlayNode.getInfo());
 								break;
 						}
 						baInputStream.close();
@@ -228,6 +277,11 @@ public class MessagingNode extends Thread {
 					break;
 				case "exit-overlay":
 					deRegister();
+					break;
+				case "connect":
+					String ipAddress = splitMessage[1];
+					int port = Integer.parseInt(splitMessage[2]);
+					connectToNode(ipAddress, port, 129);
 					break;
 				default:
 					System.out.println("Command could not be understood.");
