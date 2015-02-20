@@ -28,6 +28,12 @@ public class MessagingNode extends Thread {
 	private static int ID;
 	private static RoutingEntry registry;
 	
+	static int sendTracker;
+	static int receiveTracker;
+	static int relayTracker;
+	static long sendSummation;
+	static long receiveSummation;
+	
 	private static Queue<OverlayNodeSendsData> relayQueue = new LinkedList<OverlayNodeSendsData>();
 	
 	public MessagingNode(Socket socket, int port) throws IOException {
@@ -130,22 +136,33 @@ public class MessagingNode extends Thread {
 						din = new DataInputStream(socket.getInputStream());
 						entry = new RoutingEntry(nodeManifest.getIpAddress2(), nodeManifest.getPort2(), nodeManifest.getID2(), 
 								socket, dout, din);
-						routingTable.add(entry);
+						if (routingTable.get(0).getID() > entry.getID()) {
+							routingTable.add(0, entry);
+						}else {
+							routingTable.add(entry);
+						}
 						
 						socket = new Socket(nodeManifest.getIpAddress3(), nodeManifest.getPort3());
 						dout = new DataOutputStream(socket.getOutputStream());
 						din = new DataInputStream(socket.getInputStream());
 						entry = new RoutingEntry(nodeManifest.getIpAddress3(), nodeManifest.getPort3(), nodeManifest.getID3(), 
 								socket, dout, din);
-						routingTable.add(entry);
+						if (routingTable.get(0).getID() > entry.getID()) {
+							if (routingTable.get(1).getID() > entry.getID()) {
+								routingTable.add(entry);
+							}
+							routingTable.add(1, entry);
+						}else {
+							routingTable.add(0, entry);
+						}
 						
-						System.out.println("Routing Table:");
+						/*System.out.println("Routing Table:");
 						System.out.println("ipAddress: " + routingTable.get(0).getIpAddress() + " port: " + routingTable.get(0).getPort() + 
 								" ID: " + routingTable.get(0).getID());
 						System.out.println("ipAddress: " + routingTable.get(1).getIpAddress() + " port: " + routingTable.get(1).getPort() + 
 								" ID: " + routingTable.get(1).getID());
 						System.out.println("ipAddress: " + routingTable.get(2).getIpAddress() + " port: " + routingTable.get(2).getPort() + 
-								" ID: " + routingTable.get(2).getID());
+								" ID: " + routingTable.get(2).getID());*/
 						
 						for (int i = 0; i < nodeManifest.getTotalNodes(); i++) {
 							allIDs.add(nodeManifest.getNodeIDs()[i]);
@@ -160,6 +177,9 @@ public class MessagingNode extends Thread {
 						new DataRouter(packets).start();
 						break;
 					case RegistryRequestsTrafficSummary:
+						OverlayNodeReportsTrafficSummary summary = new OverlayNodeReportsTrafficSummary(ID, sendTracker, receiveTracker,
+								relayTracker, sendSummation, receiveSummation);
+						sendData(summary.getMarshalledBytes(), registry);
 						break;
 				}
 				baInputStream.close();
@@ -252,13 +272,9 @@ public class MessagingNode extends Thread {
 	}
 	
 	private static class DataRouter extends Thread {
-		int sendTracker;
-		int receiveTracker;
-		int relayTracker;
-		long sendSummation;
-		long receiveSummation;
 		Random rand;
 		int packetsToSend;
+		int count;
 		
 		OverlayNodeSendsData data;
 		
@@ -270,12 +286,13 @@ public class MessagingNode extends Thread {
 			receiveSummation = 0;
 			rand = new Random();
 			packetsToSend = packets;
+			count = 0;
 			
 			data = new OverlayNodeSendsData();
 		}
 		
 		public void run() {
-			while (true) {
+			while (count < 25) {
 				synchronized(relayQueue) {
 					data = relayQueue.poll();
 				}
@@ -287,15 +304,24 @@ public class MessagingNode extends Thread {
 							// TODO Auto-generated catch block
 							e.printStackTrace();
 						}
+					}else {
+						count++;
+						try {
+							this.sleep(rand.nextInt(1000));
+						} catch (InterruptedException e) {
+							// TODO Auto-generated catch block
+							e.printStackTrace();
+						}
 					}
 				}else {
+					count = 0;
 					if (data.getDestID() == ID) {
 						receiveTracker++;
 						receiveSummation+=data.getPayload();
-						System.out.println("Received packet from " + data.getSourceID());
+						//System.out.println("Received packet from " + data.getSourceID());
 					}else {
 						relayTracker++;
-						System.out.println("Relayed packet from " + data.getSourceID() + " to " + data.getDestID());
+						//System.out.println("Relayed packet from " + data.getSourceID() + " to " + data.getDestID());
 						try {
 							relay(appendTrace(data));
 						} catch (IOException e) {
@@ -304,6 +330,14 @@ public class MessagingNode extends Thread {
 						}
 					}
 				}
+			}
+			OverlayNodeReportsTaskFinished done;
+			try {
+				done = new OverlayNodeReportsTaskFinished(registry.getIpAddress(), registry.getPort(), ID);
+				sendData(done.getMarshalledBytes(), registry);
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
 			}
 		}
 		private void sendNewData() throws IOException {
@@ -324,7 +358,7 @@ public class MessagingNode extends Thread {
 			OverlayNodeSendsData dataToSend = new OverlayNodeSendsData(dest, source, payload, trace);
 			relay(dataToSend);
 			
-			System.out.println("Sent packet to " + dest);
+			//System.out.println("Sent packet to " + dest);
 		}
 		
 		private OverlayNodeSendsData appendTrace(OverlayNodeSendsData data) throws IOException {
@@ -338,23 +372,19 @@ public class MessagingNode extends Thread {
 		}
 		
 		private void relay(OverlayNodeSendsData dataToSend) throws IOException {
-			int choice = 0;
-			int difference = -1;
-			
-			for (int i = 0; i < 3; i++) {
-				int temp = allIDs.indexOf(dataToSend.getDestID()) - allIDs.indexOf(routingTable.get(i));
-				if ((temp >= 0 && difference >=0 && temp < difference) || (temp >= 0 && difference < 0)) {
-					difference = temp;
-					choice = i;
-				}else if (temp < 0 && difference < 0 && temp < difference){
-					difference = temp;
-					choice = i;
+			if (routingTable.get(0).getID() == dataToSend.getDestID()) {
+				sendData(dataToSend.getMarshalledBytes(), routingTable.get(0));
+			}else if (routingTable.get(1).getID() <= dataToSend.getDestID()) {
+				if (routingTable.get(2).getID() <= dataToSend.getDestID()) {
+					sendData(dataToSend.getMarshalledBytes(), routingTable.get(2));
+				}else {
+					sendData(dataToSend.getMarshalledBytes(), routingTable.get(1));
 				}
+			}else {
+				sendData(dataToSend.getMarshalledBytes(), routingTable.get(2));
 			}
-			sendData(dataToSend.getMarshalledBytes(), routingTable.get(choice));
 		}
 	}
-	
 	private static class NodeCommandParser extends Thread {
 		public NodeCommandParser() {}
 		

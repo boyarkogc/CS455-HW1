@@ -17,9 +17,10 @@ public class Registry {
 	private static final int OverlayNodeReportsTrafficSummary = 12;
 	
 	private static LinkedList<RoutingEntry> overlay;
+	private static ArrayList<OverlayNodeReportsTrafficSummary> trafficReport;
 	private static ArrayList<Integer> unusedIDs;
-	//private static ArrayList<RegistryThread> threads;
 	private static int nodesReady;
+	private static int nodesFinished;
 	
 	private static Random rand;
 	
@@ -49,8 +50,25 @@ public class Registry {
 		nodesReady++;
 	}
 	
-	private synchronized static void resetNodesReady() {
+	private static void resetNodesReady() {
 		nodesReady = 0;
+	}
+	
+	private static void resetNodesFinished() {
+		nodesFinished = 0;
+	}
+	private synchronized static void addToTrafficReport(OverlayNodeReportsTrafficSummary trafficSummary) {
+		int index = 0;
+		for (int i = 0; i < trafficReport.size(); i++) {
+			if (trafficReport.get(i).getID() < trafficSummary.getID()) {
+				index = i + 1;
+			}
+		}
+		if (index >= trafficReport.size()) {
+			trafficReport.add(trafficSummary);
+		}else {
+			trafficReport.add(index, trafficSummary);
+		}	
 	}
 	
 	private synchronized static void addToOverlay(String ipAddress, int port, int ID, Socket socket, DataOutputStream dout, DataInputStream din) {
@@ -92,6 +110,7 @@ public class Registry {
 		int[] nodeIDs = new int[overlay.size()];
 		
 		resetNodesReady();
+		resetNodesFinished();
 		
 		for (int i = 0; i < overlay.size(); i++) {
 			nodeIDs[i] = overlay.get(i).getID();
@@ -133,17 +152,27 @@ public class Registry {
 			overlay.get(j).getDout().flush();
 		}
 	}
+	private static void getTrafficReport() throws IOException {
+		RegistryRequestsTrafficSummary summary = new RegistryRequestsTrafficSummary();
+		for (int j = 0; j < overlay.size(); j++) {
+			overlay.get(j).getDout().writeInt(summary.getMarshalledBytes().length);
+			overlay.get(j).getDout().write(summary.getMarshalledBytes());
+			overlay.get(j).getDout().flush();
+		}
+	}
 	
 	public static void main(String[] args) throws Exception {
 		Registry reg = Registry.getInstance();
 		overlay = new LinkedList<RoutingEntry>();
 		unusedIDs = new ArrayList<Integer>();
+		trafficReport = new ArrayList<OverlayNodeReportsTrafficSummary>();
 		rand = new Random();
+		
 		
 		for (int i = 0; i < 128; i++) {
 			unusedIDs.add(i);
 		}
-        ServerSocket registry = new ServerSocket(4444);
+        ServerSocket registry = new ServerSocket(Integer.parseInt(args[0]));
         RegistryCommandParser parser = new RegistryCommandParser();
         parser.start();
         
@@ -151,7 +180,6 @@ public class Registry {
         try {
             while (true) {
             	new RegistryThread(registry.accept()).start();
-            	//threads.add(thread);
             }
         }finally {
             registry.close();
@@ -240,8 +268,35 @@ public class Registry {
 								}
 								break;
 							case OverlayNodeReportsTaskFinished:
+								nodesFinished++;
+								if (nodesFinished == overlay.size()) {
+									getTrafficReport();
+								}
 								break;
 							case OverlayNodeReportsTrafficSummary:
+								OverlayNodeReportsTrafficSummary summary = new OverlayNodeReportsTrafficSummary(data);
+								addToTrafficReport(summary);
+								synchronized (trafficReport) {
+									if (trafficReport.size() == overlay.size()) {
+										int packetsSent = 0;
+										int packetsReceived = 0;
+										int packetsRelayed = 0;
+										int sumSent = 0;
+										int sumReceived = 0;
+										
+										System.out.println("Node    Packets Sent    Packets Received    Packets Relayed    Sum Values Sent    Sum Values Received");
+										for (int i = 0; i < trafficReport.size(); i++) {
+											System.out.println(trafficReport.get(i).getID() + " " + trafficReport.get(i).getPacketsSent() + " " + trafficReport.get(i).getPacketsReceived() +
+													" " + trafficReport.get(i).getPacketsRelayed() + " " + trafficReport.get(i).getSumSent() + " " + trafficReport.get(i).getSumReceived());
+											packetsSent += trafficReport.get(i).getPacketsSent();
+											packetsReceived += trafficReport.get(i).getPacketsReceived();
+											packetsRelayed += trafficReport.get(i).getPacketsRelayed();
+											sumSent += trafficReport.get(i).getSumSent();
+											sumReceived += trafficReport.get(i).getSumReceived();
+										}
+										System.out.println("Sum : " + packetsSent + " " + packetsReceived + " " + packetsRelayed + " " + sumSent + " " + sumReceived);
+									}
+								}
 								break;
 						}
 						baInputStream.close();
